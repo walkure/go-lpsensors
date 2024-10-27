@@ -19,13 +19,28 @@ func (d *Dev) readReg(reg uint8, b []byte) error {
 		if err := d.d.Tx(write, read); err != nil {
 			return fmt.Errorf("sr: %w", err)
 		}
+		slog.Debug("readReg", "spi", dumpRead(reg, b))
 		copy(b, read[1:])
 		return nil
 	}
 	if err := d.d.Tx([]byte{reg}, b); err != nil {
 		return fmt.Errorf("ir: %w", err)
 	}
+	slog.Debug("readReg", "i2c", dumpRead(reg, b))
 	return nil
+}
+
+func dumpRead(reg uint8, b []byte) string {
+	resp := make([]string, 0, len(b))
+	for i := 0; i < len(b); i++ {
+		resp = append(resp, fmt.Sprintf("0x%02x", b[i]))
+	}
+
+	if reg&0x80 != 0 {
+		return fmt.Sprintf("multuple read from 0x%02x: %s", reg&^uint8(0x80), strings.Join(resp, ","))
+	}
+
+	return fmt.Sprintf("single read from 0x%02x: %s", reg, strings.Join(resp, ","))
 }
 
 func (d *Dev) writeCommands(b []byte) error {
