@@ -146,7 +146,7 @@ func (d *Dev) makeDev(opts *Opts) error {
 	)
 
 	if err := d.ShowCtrls(); err != nil {
-		return d.wrap(err)
+		return err
 	}
 
 	return d.Init(opts)
@@ -165,7 +165,8 @@ func (d *Dev) Init(opts *Opts) error {
 			d.regs.ctrl_reg1,
 			d.initCmd,
 		}); err != nil {
-		return d.wrap(err)
+		return d.wrap(
+			fmt.Errorf("failed to send init command: %w", err))
 	}
 
 	return nil
@@ -199,7 +200,10 @@ func (d Dev) Sense(ctx context.Context, e *SensorValues) error {
 		}
 	}
 
-	return d.sense(e)
+	if err := d.sense(e); err != nil {
+		return d.wrap(err)
+	}
+	return nil
 }
 
 // Boot is a function to send BOOT[7] command to the device.
@@ -225,9 +229,12 @@ func (d *Dev) SWReset(ctx context.Context) error {
 		return d.swResetLPS331(ctx)
 	case chipLPS22H, chipLPS25H:
 		// set and check SWReset[2]
-		return d.setAndCheckCtrlReg2(ctx, 0b100)
+		if err := d.setAndCheckCtrlReg2(ctx, 0b100); err != nil {
+			return d.wrap(fmt.Errorf("SWReset: failed :%w", err))
+		}
+		return nil
 	default:
-		return d.wrap(fmt.Errorf("unknown device type:%x", d.chipType))
+		return d.wrap(fmt.Errorf("SWReset: unknown device type:%x", d.chipType))
 	}
 }
 
@@ -235,13 +242,14 @@ func (d *Dev) SWReset(ctx context.Context) error {
 func (d *Dev) ShowCtrls() error {
 	b := [1]byte{}
 	if err := d.readReg(d.regs.ctrl_reg1, b[:]); err != nil {
-		return d.wrap(err)
+		return d.wrap(
+			fmt.Errorf("ShowCtrls: failed to read CTRL_REG1(0x%x): %w", d.regs.ctrl_reg1, err))
 	}
 	reg1 := fmt.Sprintf("%08b(0x%02x)", b[0], b[0])
 	//fmt.Printf("CTRL_REG1: %08b(0x%02x)\n", b[0], b[0])
 
 	if err := d.readReg(d.regs.ctrl_reg2, b[:]); err != nil {
-		return d.wrap(err)
+		return fmt.Errorf("ShowCtrls: failed to read CTRL_REG2(0x%x): %w", d.regs.ctrl_reg2, err)
 	}
 	reg2 := fmt.Sprintf("%08b(0x%02x)", b[0], b[0])
 	//fmt.Printf("CTRL_REG2: %08b(0x%02x)\n", b[0], b[0])
@@ -255,7 +263,7 @@ func (d *Dev) ShowCtrls() error {
 	}
 
 	if err := d.readReg(d.regs.res_conf, b[:]); err != nil {
-		return d.wrap(err)
+		return d.wrap(fmt.Errorf("ShowCtrls: failed to read RES_CONF(0x%x): %w", d.regs.res_conf, err))
 	}
 	resConf := fmt.Sprintf("%08b(0x%02x)", b[0], b[0])
 	//fmt.Printf("RES_CONF : %08b(0x%02x)\n", b[0], b[0])
@@ -288,13 +296,13 @@ func (d *Dev) swResetLPS331(ctx context.Context) error {
 			d.regs.ctrl_reg2,
 			reset,
 		}); err != nil {
-		return d.wrap(err)
+		return fmt.Errorf("swResetLPS331: failed to write SWReset command CTRL_REG2(0x%x): %w", d.regs.ctrl_reg2, err)
 	}
 
 	// wait for process SWRESET
 	timer := time.NewTimer(5 * time.Millisecond)
 	if err := waitCancel(ctx, timer); err != nil {
-		return d.wrap(err)
+		return fmt.Errorf("swResetLPS331: failed to wait process SWRESET: %w", err)
 	}
 
 	// clear CTRL_REG2 (NOT automatically cleared after SWRESET)
@@ -303,19 +311,19 @@ func (d *Dev) swResetLPS331(ctx context.Context) error {
 			d.regs.ctrl_reg2,
 			0,
 		}); err != nil {
-		return d.wrap(err)
+		return fmt.Errorf("swResetLPS331: failed to clear SWReset command CTRL_REG2(0x%x): %w", d.regs.ctrl_reg2, err)
 	}
 
 	// wait for process...
 	timer.Reset(5 * time.Millisecond)
 	if err := waitCancel(ctx, timer); err != nil {
-		return d.wrap(err)
+		return fmt.Errorf("swResetLPS331: failed to wait clearing SWRESET: %w", err)
 	}
 
 	//read PRESS_OUT and TEMP_OUT to clear STATUS_REG
 	b := [5]byte{}
 	if err := d.readReg(0x28|0x80, b[:5]); err != nil {
-		return d.wrap(err)
+		return fmt.Errorf("swResetLPS331: failed to discard STATUS_REG(read PRESS/TEMP_OUT): %w", err)
 	}
 
 	return nil
@@ -328,7 +336,8 @@ func (d *Dev) setAndCheckCtrlReg2(ctx context.Context, value byte) error {
 			d.regs.ctrl_reg2,
 			value,
 		}); err != nil {
-		return d.wrap(err)
+		return fmt.Errorf("setAndCheckCtrlReg2: failed to write value 0b%08b(0x%x) command CTRL_REG2(0x%x): %w",
+			value, value, d.regs.ctrl_reg2, err)
 	}
 
 	b := [1]byte{}
@@ -339,7 +348,8 @@ func (d *Dev) setAndCheckCtrlReg2(ctx context.Context, value byte) error {
 
 	for {
 		if err := d.readReg(d.regs.ctrl_reg2, b[:]); err != nil {
-			return d.wrap(err)
+			return fmt.Errorf("setAndCheckCtrlReg2: failed read from CTRL_REG2(0x%x): %w",
+				d.regs.ctrl_reg2, err)
 		}
 		// Wait for clear the set flag
 		if b[0]&value == 0 {
@@ -349,7 +359,7 @@ func (d *Dev) setAndCheckCtrlReg2(ctx context.Context, value byte) error {
 		timer.Reset(timeout)
 		select {
 		case <-ctx.Done():
-			return d.wrap(ctx.Err())
+			return fmt.Errorf("setAndCheckCtrlReg2: %w", ctx.Err())
 		case <-timer.C:
 			// spin..
 		}
@@ -364,7 +374,8 @@ func (d Dev) measureOneshot(ctx context.Context) error {
 			d.regs.ctrl_reg1,
 			0, // turn off
 		}); err != nil {
-		return d.wrap(err)
+		return fmt.Errorf("measureOneshot: failed to clear CTRL_REG1(0x%x): %w",
+			d.regs.ctrl_reg1, err)
 	}
 
 	// Set the pressure sensor to higher-precision
@@ -382,7 +393,8 @@ func (d Dev) measureOneshot(ctx context.Context) error {
 				d.regs.res_conf, // RES_CONF
 				cmd,
 			}); err != nil {
-			return d.wrap(err)
+			return fmt.Errorf("measureOneshot: failed to write cmd 0b%08b(0x%x) command CTRL_REG2(0x%x): %w",
+				cmd, cmd, d.regs.ctrl_reg2, err)
 		}
 
 	}
@@ -393,14 +405,18 @@ func (d Dev) measureOneshot(ctx context.Context) error {
 			d.regs.ctrl_reg1,
 			0b10000100, // PD=1 and BDU=1
 		}); err != nil {
-		return d.wrap(err)
+		return fmt.Errorf("measureOneshot: failed to start ONE_SHOT command to CTRL_REG1(0x%x): %w",
+			d.regs.ctrl_reg1, err)
 	}
 
 	// Run one shot measurement (Temperature and Pressure), self clearing bit when done.
 	// Wait until the measurement is completed: Wait that reading
 
 	// set and check ONE_SHOT[0]
-	return d.setAndCheckCtrlReg2(ctx, 0b1)
+	if err := d.setAndCheckCtrlReg2(ctx, 0b1); err != nil {
+		return fmt.Errorf("measureOneshot: failed to set and check ONE_SHOT[0]: %w", err)
+	}
+	return nil
 }
 
 func (d Dev) sense(e *SensorValues) error {
@@ -412,7 +428,7 @@ func (d Dev) sense(e *SensorValues) error {
 
 	// Read Temperature 0x2b(TEMP_OUT_L) 0x2c(TEMP_OUT_H)
 	if err := d.readReg(0x2b|0x80, datum[:2]); err != nil {
-		return d.wrap(err)
+		return fmt.Errorf("sense: failed to read TEMP_OUT: %w", err)
 	}
 	//rawTemp := int16(binary.LittleEndian.Uint16(b[3:]))
 	rawTemp := int16(datum[1])<<8 | int16(datum[0])
@@ -430,7 +446,7 @@ func (d Dev) sense(e *SensorValues) error {
 	// Read Pressure 0x28(PRESS_OUT_XL) 0x29(PRESS_OUT_L) 0x2a(PRESS_OUT_H)
 	// Read multiple bytes : 0b10000000 = 0x80
 	if err := d.readReg(0x28|0x80, datum[:3]); err != nil {
-		return d.wrap(err)
+		return fmt.Errorf("sense: failed to read PRESS_OUT: %w", err)
 	}
 
 	//rawPress := uint64(binary.LittleEndian.Uint32(b[:]))
@@ -455,13 +471,13 @@ func (d *Dev) readReg(reg uint8, b []byte) error {
 		// Rest of the write buffer is ignored.
 		write[0] = reg
 		if err := d.d.Tx(write, read); err != nil {
-			return d.wrap(fmt.Errorf("sr: %w", err))
+			return fmt.Errorf("sr: %w", err)
 		}
 		copy(b, read[1:])
 		return nil
 	}
 	if err := d.d.Tx([]byte{reg}, b); err != nil {
-		return d.wrap(fmt.Errorf("ir: %w", err))
+		return fmt.Errorf("ir: %w", err)
 	}
 	return nil
 }
@@ -484,7 +500,7 @@ func (d *Dev) writeCommands(b []byte) error {
 	slog.Debug("writeCommands", comType, attrs)
 
 	if err := d.d.Tx(b, nil); err != nil {
-		return d.wrap(fmt.Errorf("%sw: %w", comType, err))
+		return fmt.Errorf("%sw: %w", comType, err)
 	}
 	return nil
 }
