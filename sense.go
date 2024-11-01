@@ -42,6 +42,8 @@ func (d Dev) measureOneshot(ctx context.Context) error {
 			cmd = 0b00001111 // AVGT1 AVGT0 = 1 (Average 64) AVGP1 AVGP0 = 1 (Average 512)
 		case chipLPS331A:
 			cmd = 0b01111010 // AVGT2 AVGT1 AVGT0 AVGP3 = 1(Average 512) , AVGT2 AVGT1 AVGT1 = 0 1 0 (Average 4)
+		default:
+			return fmt.Errorf("measureOneshot: unknown chip type: %v", d.chipType)
 		}
 
 		if err := d.writeCommands(
